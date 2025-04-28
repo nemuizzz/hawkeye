@@ -1,5 +1,9 @@
 # Hawkeye
 
+<p align="left">
+  <img src="assets/logo.png" alt="Hawkeye Logo" width="100" height="100">
+</p>
+
 A simple yet powerful URL monitoring tool that helps you track changes in web content. Use it as a Go package in your code or as a command-line tool. Monitor multiple URLs simultaneously with a single command.
 
 ## What Can Hawkeye Do?

@@ -36,6 +36,12 @@ hawkeye watch https://example1.com https://example2.com https://example3.com
 
 # Watch with custom settings
 hawkeye watch https://example.com --interval 1m --ignore ".ads,#footer"
+
+# Ignore whitespace changes
+hawkeye watch https://example.com --normalize
+
+# Ignore timestamp changes
+hawkeye watch https://example.com --ignore-timestamps
 ```
 
 ### Use in Go Code
@@ -148,6 +154,9 @@ func main() {
 - Save results to a file
 - Different settings for each URL
 - Group URLs for easier management
+- Normalize whitespace to avoid false positives
+- Ignore timestamp changes to prevent false alerts
+- View detailed change information including what exactly changed
 
 ## Command Line Options
 
@@ -164,6 +173,8 @@ Options:
   -g, --group       Group name for URLs
   -r, --retries     Number of retry attempts
   -R, --retry-interval Time between retries
+  -n, --normalize   Normalize whitespace to ignore insignificant changes
+  -T, --ignore-timestamps Ignore timestamps when comparing content
       --help        Show help
 
 hawkeye list [options]

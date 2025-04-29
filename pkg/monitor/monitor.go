@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,6 +59,9 @@ type Config struct {
 	RetryInterval       time.Duration
 	FollowRedirects     bool
 	IncludeResponseBody bool
+	NormalizeWhitespace bool
+	ContentFilters      ContentFilterList
+	IgnoreTimestamps    bool
 }
 
 // Monitor watches a URL for changes
@@ -65,7 +69,6 @@ type Monitor struct {
 	config       Config
 	client       *http.Client
 	lastContent  []byte
-	lastHash     []byte
 	lastCheck    time.Time
 	changes      chan Change
 	stop         chan struct{}
@@ -75,18 +78,21 @@ type Monitor struct {
 	checkCount   int64
 	status       string
 	isFirstCheck bool
+	filters      ContentFilterList
 }
 
 // DefaultConfig returns a default configuration
 func DefaultConfig(url string) *Config {
 	return &Config{
-		URL:             url,
-		Interval:        time.Minute * 5,
-		Timeout:         time.Second * 30,
-		Method:          MethodHash,
-		RetryCount:      3,
-		RetryInterval:   time.Second * 10,
-		FollowRedirects: true,
+		URL:                 url,
+		Interval:            time.Minute * 5,
+		Timeout:             time.Second * 30,
+		Method:              MethodHash,
+		RetryCount:          3,
+		RetryInterval:       time.Second * 10,
+		FollowRedirects:     true,
+		NormalizeWhitespace: false,
+		IgnoreTimestamps:    false,
 	}
 }
 
@@ -108,6 +114,22 @@ func NewMonitorWithConfig(config *Config) *Monitor {
 
 	client := customhttp.NewClient(clientOpts)
 
+	// Set up filters
+	var filters ContentFilterList
+
+	// Add the provided filters
+	if config.ContentFilters != nil {
+		filters = append(filters, config.ContentFilters...)
+	}
+
+	// Add default timestamp filter if configured
+	if config.IgnoreTimestamps {
+		tsFilter, _ := NewTimestampFilter()
+		if tsFilter != nil {
+			filters = append(filters, tsFilter)
+		}
+	}
+
 	return &Monitor{
 		config:       *config,
 		client:       client,
@@ -116,6 +138,7 @@ func NewMonitorWithConfig(config *Config) *Monitor {
 		ctx:          ctx,
 		cancel:       cancel,
 		isFirstCheck: true,
+		filters:      filters,
 	}
 }
 
@@ -250,38 +273,53 @@ func (m *Monitor) detectChange(content []byte) (bool, string) {
 	// If this is the first check, just store the content
 	if m.lastContent == nil {
 		m.lastContent = content
-		m.lastHash = m.calculateHash(content)
 		return false, ""
+	}
+
+	// Apply filters to content if any are defined
+	compareContent := content
+	compareLast := m.lastContent
+
+	// Apply content filters
+	if len(m.filters) > 0 {
+		compareContent = m.filters.Apply(compareContent)
+		compareLast = m.filters.Apply(compareLast)
+	}
+
+	// Normalize content if configured
+	if m.config.NormalizeWhitespace {
+		compareContent = m.normalizeContent(compareContent)
+		compareLast = m.normalizeContent(compareLast)
 	}
 
 	switch m.config.Method {
 	case MethodHash:
-		currentHash := m.calculateHash(content)
-		changed := !byteSliceEqual(currentHash, m.lastHash)
+		currentHash := m.calculateHash(compareContent)
+		lastHash := m.calculateHash(compareLast)
+		changed := !byteSliceEqual(currentHash, lastHash)
 
 		if changed {
-			m.lastContent = content
-			m.lastHash = currentHash
-			return true, fmt.Sprintf("Content hash changed")
+			details := m.findDifference(compareLast, compareContent)
+			m.lastContent = content // Store the original content
+			return true, details
 		}
 
 	case MethodLength:
-		oldLen := len(m.lastContent)
-		newLen := len(content)
+		oldLen := len(compareLast)
+		newLen := len(compareContent)
 
 		if oldLen != newLen {
-			m.lastContent = content
-			m.lastHash = m.calculateHash(content)
-			return true, fmt.Sprintf("Content length changed from %d to %d", oldLen, newLen)
+			details := m.findDifference(compareLast, compareContent)
+			m.lastContent = content // Store the original content
+			return true, details
 		}
 
 	case MethodCustom:
 		if m.config.CustomCompareFn != nil {
-			changed, details := m.config.CustomCompareFn(m.lastContent, content)
+			changed, details := m.config.CustomCompareFn(compareLast, compareContent)
 
 			if changed {
-				m.lastContent = content
-				m.lastHash = m.calculateHash(content)
+				m.lastContent = content // Store the original content
 				return true, details
 			}
 		}
@@ -294,6 +332,79 @@ func (m *Monitor) detectChange(content []byte) (bool, string) {
 func (m *Monitor) calculateHash(content []byte) []byte {
 	hash := sha256.Sum256(content)
 	return hash[:]
+}
+
+// findDifference finds the difference between old and new content
+// It returns a description of what changed
+func (m *Monitor) findDifference(oldContent, newContent []byte) string {
+	// Convert to string for easier comparison
+	oldStr := string(oldContent)
+	newStr := string(newContent)
+
+	// Find the first different character
+	diffPos := -1
+	for i := 0; i < len(oldStr) && i < len(newStr); i++ {
+		if oldStr[i] != newStr[i] {
+			diffPos = i
+			break
+		}
+	}
+
+	// If we found a difference or lengths are different
+	if diffPos >= 0 || len(oldStr) != len(newStr) {
+		// If no specific difference found but lengths differ,
+		// set the position to the length of the shorter string
+		if diffPos < 0 {
+			diffPos = min(len(oldStr), len(newStr))
+		}
+
+		// Get context around the difference
+		start := diffPos - 20
+		if start < 0 {
+			start = 0
+		}
+
+		oldEnd := diffPos + 20
+		if oldEnd > len(oldStr) {
+			oldEnd = len(oldStr)
+		}
+
+		newEnd := diffPos + 20
+		if newEnd > len(newStr) {
+			newEnd = len(newStr)
+		}
+
+		// Use 1-based position for human readability
+		return fmt.Sprintf("Content differs at position %d\nOld: ...%s...\nNew: ...%s...",
+			diffPos, oldStr[start:oldEnd], newStr[start:newEnd])
+	}
+
+	return "Content changed but no specific difference found"
+}
+
+// normalizeContent normalizes content to prevent false positives
+// It handles common cases like whitespace differences
+func (m *Monitor) normalizeContent(content []byte) []byte {
+	if len(content) == 0 {
+		return content
+	}
+
+	// Convert to string for easier manipulation
+	str := string(content)
+
+	// Replace carriage returns to normalize line endings
+	str = strings.ReplaceAll(str, "\r\n", "\n")
+	str = strings.ReplaceAll(str, "\r", "\n")
+
+	// Normalize consecutive whitespace if configured
+	// This is a simplification as proper regex would require the regexp package
+	if m.config.NormalizeWhitespace {
+		str = strings.Join(strings.Fields(str), " ")
+		// Trim leading/trailing whitespace
+		str = strings.TrimSpace(str)
+	}
+
+	return []byte(str)
 }
 
 // GetStatus returns the current status of the monitor

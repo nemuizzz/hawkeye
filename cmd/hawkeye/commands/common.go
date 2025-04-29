@@ -9,12 +9,14 @@ import (
 
 // MonitorConfig represents a stored monitor configuration
 type MonitorConfig struct {
-	URL       string            `json:"url"`
-	Interval  string            `json:"interval"`
-	Group     string            `json:"group,omitempty"`
-	Headers   map[string]string `json:"headers,omitempty"`
-	Ignore    []string          `json:"ignore,omitempty"`
-	CreatedAt string            `json:"created_at,omitempty"`
+	URL                 string            `json:"url"`
+	Interval            string            `json:"interval"`
+	Group               string            `json:"group,omitempty"`
+	Headers             map[string]string `json:"headers,omitempty"`
+	Ignore              []string          `json:"ignore,omitempty"`
+	CreatedAt           string            `json:"created_at,omitempty"`
+	NormalizeWhitespace bool              `json:"normalize_whitespace,omitempty"`
+	IgnoreTimestamps    bool              `json:"ignore_timestamps,omitempty"`
 }
 
 // getConfigDir returns the directory where config files are stored

@@ -14,15 +14,17 @@ import (
 
 var (
 	// Flag variables
-	interval      string
-	timeout       string
-	format        string
-	headers       []string
-	ignore        []string
-	output        string
-	group         string
-	retryCount    int
-	retryInterval string
+	interval            string
+	timeout             string
+	format              string
+	headers             []string
+	ignore              []string
+	output              string
+	group               string
+	retryCount          int
+	retryInterval       string
+	normalizeWhitespace bool
+	ignoreTimestamps    bool
 
 	// watchCmd represents the watch command
 	watchCmd = &cobra.Command{
@@ -77,15 +79,17 @@ Example:
 			// Create and add monitors for each URL
 			for _, url := range args {
 				config := &monitor.Config{
-					URL:             url,
-					Interval:        intervalDuration,
-					Timeout:         timeoutDuration,
-					Headers:         headerMap,
-					IgnoreSelectors: ignore,
-					Method:          monitor.MethodHash,
-					RetryCount:      retryCount,
-					RetryInterval:   retryIntervalDuration,
-					FollowRedirects: true,
+					URL:                 url,
+					Interval:            intervalDuration,
+					Timeout:             timeoutDuration,
+					Headers:             headerMap,
+					IgnoreSelectors:     ignore,
+					Method:              monitor.MethodHash,
+					RetryCount:          retryCount,
+					RetryInterval:       retryIntervalDuration,
+					FollowRedirects:     true,
+					NormalizeWhitespace: normalizeWhitespace,
+					IgnoreTimestamps:    ignoreTimestamps,
 				}
 
 				_, err := manager.AddMonitorWithConfig(config)
@@ -188,6 +192,26 @@ Example:
 								fmt.Print(detailsString)
 							}
 						}
+
+						if change.ContentType != "" {
+							typeString := fmt.Sprintf("  Content-Type: %s\n", change.ContentType)
+
+							if outputFile != nil {
+								outputFile.WriteString(typeString)
+							} else {
+								fmt.Print(typeString)
+							}
+						}
+
+						if change.StatusCode > 0 {
+							codeString := fmt.Sprintf("  Status Code: %d\n", change.StatusCode)
+
+							if outputFile != nil {
+								outputFile.WriteString(codeString)
+							} else {
+								fmt.Print(codeString)
+							}
+						}
 					}
 				}
 			}
@@ -205,6 +229,8 @@ func init() {
 	watchCmd.Flags().StringVarP(&group, "group", "g", "", "Group name for URLs")
 	watchCmd.Flags().IntVarP(&retryCount, "retries", "r", 3, "Number of retry attempts")
 	watchCmd.Flags().StringVarP(&retryInterval, "retry-interval", "R", "10s", "Time between retries")
+	watchCmd.Flags().BoolVarP(&normalizeWhitespace, "normalize", "n", false, "Normalize whitespace to ignore insignificant changes")
+	watchCmd.Flags().BoolVarP(&ignoreTimestamps, "ignore-timestamps", "T", false, "Ignore timestamps when comparing content")
 }
 
 // saveMonitors saves the monitor configurations to a file
@@ -240,12 +266,14 @@ func saveMonitors(urls []string, headers map[string]string) error {
 	// Add or update monitors
 	for _, url := range urls {
 		monitors[url] = MonitorConfig{
-			URL:       url,
-			Interval:  interval,
-			Group:     group,
-			Headers:   headers,
-			Ignore:    ignore,
-			CreatedAt: time.Now().Format(time.RFC3339),
+			URL:                 url,
+			Interval:            interval,
+			Group:               group,
+			Headers:             headers,
+			Ignore:              ignore,
+			CreatedAt:           time.Now().Format(time.RFC3339),
+			NormalizeWhitespace: normalizeWhitespace,
+			IgnoreTimestamps:    ignoreTimestamps,
 		}
 	}
 

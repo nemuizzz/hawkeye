@@ -73,6 +73,12 @@ Shows information about monitoring status, groups, and more.`,
 					if len(config.Ignore) > 0 {
 						fmt.Printf("  Ignore: %v\n", config.Ignore)
 					}
+					if config.NormalizeWhitespace {
+						fmt.Printf("  Normalize Whitespace: true\n")
+					}
+					if config.IgnoreTimestamps {
+						fmt.Printf("  Ignore Timestamps: true\n")
+					}
 					if config.CreatedAt != "" {
 						fmt.Printf("  Added: %s\n", config.CreatedAt)
 					}
